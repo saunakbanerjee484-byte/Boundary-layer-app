@@ -188,8 +188,10 @@ def render_main(conditions: FlowConditions, model_key: str) -> None:
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        glass_card_open("Non-Dimensional Profile (u⁺ vs y⁺)")
-        st.plotly_chart(plot_velocity_profile(profile), use_container_width=True)
+        is_laminar = "laminar" in model.category.lower()
+        title = "Velocity Profile (u/U vs y/δ)" if is_laminar else "Non-Dimensional Profile (u⁺ vs y⁺)"
+        glass_card_open(title)
+        st.plotly_chart(plot_velocity_profile(profile, is_laminar=is_laminar), use_container_width=True)
         glass_card_close()
 
     with col2:

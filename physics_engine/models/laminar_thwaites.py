@@ -181,4 +181,9 @@ class ThwaitesModel(BoundaryLayerModel):
         y_plus = y_phys * u_tau / conditions.nu
         u_plus = u / u_tau
         mask = y_plus > 1e-3
-        return ProfileData(y_plus=y_plus[mask], u_plus=u_plus[mask])
+        return ProfileData(
+            y_plus=y_plus[mask], 
+            u_plus=u_plus[mask],
+            y_by_delta=eta,
+            u_by_U=u_over_U
+        )

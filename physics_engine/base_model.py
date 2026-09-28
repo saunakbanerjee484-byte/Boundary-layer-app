@@ -16,6 +16,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, Optional, TypedDict
+from typing_extensions import NotRequired
 
 import numpy as np
 
@@ -54,10 +55,15 @@ class FlowConditions:
 
 
 class ProfileData(TypedDict):
-    """Non-dimensional inner-region profile: u+ vs y+ (semi-log plot)."""
+    """
+    Non-dimensional inner-region profile: u+ vs y+ (semi-log plot) for turbulent,
+    or u/U vs y/delta (linear plot) for laminar models.
+    """
 
     y_plus: np.ndarray
     u_plus: np.ndarray
+    y_by_delta: NotRequired[np.ndarray]
+    u_by_U: NotRequired[np.ndarray]
 
 
 class GrowthData(TypedDict):
@@ -67,7 +73,7 @@ class GrowthData(TypedDict):
     delta: np.ndarray
 
 
-class ShearData(TypedDict, total=False):
+class ShearData(TypedDict):
     """
     Wall shear stress along the plate: tau_w(x), plus an optional flagged
     separation location where tau_w crosses zero (or the model's own
@@ -76,8 +82,8 @@ class ShearData(TypedDict, total=False):
 
     x: np.ndarray
     tau_w: np.ndarray
-    x_separation: Optional[float]
-    separated: bool
+    x_separation: NotRequired[Optional[float]]
+    separated: NotRequired[bool]
 
 
 class BoundaryLayerModel(ABC):

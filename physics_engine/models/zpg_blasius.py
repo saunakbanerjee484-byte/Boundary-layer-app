@@ -119,10 +119,18 @@ class BlasiusModel(BoundaryLayerModel):
         y_plus = y_phys * u_tau / conditions.nu
         u_plus = (fp * conditions.U) / u_tau  # u/u_tau, with u = U * f'
 
+        y_by_delta = eta / 4.91
+        u_by_U = fp
+
         # Clip to the standard plotting window and drop the y+=0 point
-        # (log-x axis cannot render zero).
+        # (log-x axis cannot render zero) for the turbulent fallback.
         mask = (y_plus > 1e-3) & (y_plus <= Y_PLUS_MAX)
-        return ProfileData(y_plus=y_plus[mask], u_plus=u_plus[mask])
+        return ProfileData(
+            y_plus=y_plus[mask], 
+            u_plus=u_plus[mask],
+            y_by_delta=y_by_delta,
+            u_by_U=u_by_U
+        )
 
     def compute_growth(self, conditions: FlowConditions) -> GrowthData:
         x = np.linspace(1e-4 * conditions.x_max, conditions.x_max, N_X_POINTS)

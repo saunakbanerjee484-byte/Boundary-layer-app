@@ -15,6 +15,8 @@ by a `BoundaryLayerModel`'s `compute_*` methods (see `physics_engine
 swap models via the registry without ever touching this file.
 """
 
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false
+
 from __future__ import annotations
 
 import numpy as np
@@ -59,52 +61,71 @@ def _transparent_layout(fig: go.Figure, x_title: str, y_title: str, x_log: bool 
     return fig
 
 
-def plot_velocity_profile(profile: ProfileData) -> go.Figure:
+def plot_velocity_profile(profile: ProfileData, is_laminar: bool = False) -> go.Figure:
     """
-    Figure 1: The non-dimensional inner-region profile, u+ vs y+, on a
-    semi-log x-axis -- the classical way turbulence researchers visualize
-    the viscous sublayer / log-law / wake regions on a single plot, since
-    y+ spans several orders of magnitude near the wall.
+    Figure 1: The velocity profile.
+    If Turbulent: u+ vs y+ on a semi-log x-axis.
+    If Laminar: u/U vs y/delta on a linear scale.
     """
-    y_plus = np.asarray(profile["y_plus"])
-    u_plus = np.asarray(profile["u_plus"])
-
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=y_plus,
-            y=u_plus,
-            mode="lines",
-            line=dict(color=_ACCENT, width=3),
-            fill="tozeroy",
-            fillcolor=_ACCENT_SOFT,
-            name="u+ (model)",
-        )
-    )
 
-    # Reference lines every CFD engineer expects on this plot: the viscous
-    # sublayer law u+ = y+ (valid for y+ < ~5) and the canonical log-law
-    # u+ = (1/kappa) ln(y+) + B (valid for y+ > ~30), both shown as thin
-    # dashed guides for visual calibration against the active model.
-    y_visc = np.geomspace(max(y_plus.min(), 0.5), 8.0, 30)
-    fig.add_trace(
-        go.Scatter(
-            x=y_visc, y=y_visc, mode="lines",
-            line=dict(color="rgba(45,55,72,0.35)", width=1.5, dash="dot"),
-            name="Viscous sublayer u+=y+",
-        )
-    )
-    y_log = np.geomspace(20.0, max(y_plus.max(), 30.0), 60)
-    kappa, B = 0.41, 5.0
-    fig.add_trace(
-        go.Scatter(
-            x=y_log, y=(1 / kappa) * np.log(y_log) + B, mode="lines",
-            line=dict(color="rgba(45,55,72,0.35)", width=1.5, dash="dash"),
-            name="Log-law reference",
-        )
-    )
+    if is_laminar:
+        y_by_delta = np.asarray(profile.get("y_by_delta", []))
+        u_by_U = np.asarray(profile.get("u_by_U", []))
 
-    return _transparent_layout(fig, "y⁺ (wall units, log scale)", "u⁺", x_log=True)
+        fig.add_trace(
+            go.Scatter(
+                x=y_by_delta,
+                y=u_by_U,
+                mode="lines",
+                line=dict(color=_ACCENT, width=3),
+                fill="tozeroy",
+                fillcolor=_ACCENT_SOFT,
+                name="Laminar Profile",
+            )
+        )
+        return _transparent_layout(fig, "y / δ (Dimensionless Distance)", "u / U (Dimensionless Velocity)", x_log=False)
+    else:
+        y_plus = np.asarray(profile["y_plus"])
+        u_plus = np.asarray(profile["u_plus"])
+
+        fig.add_trace(
+            go.Scatter(
+                x=y_plus,
+                y=u_plus,
+                mode="lines",
+                line=dict(color=_ACCENT, width=3),
+                fill="tozeroy",
+                fillcolor=_ACCENT_SOFT,
+                name="u+ (model)",
+            )
+        )
+
+        # Reference lines every CFD engineer expects on this plot: the viscous
+        # sublayer law u+ = y+ (valid for y+ < ~5) and the canonical log-law
+        # u+ = (1/kappa) ln(y+) + B (valid for y+ > ~30), both shown as thin
+        # dashed guides for visual calibration against the active model.
+        min_y_plus = float(y_plus.min()) if y_plus.size > 0 else 0.5
+        y_visc = np.geomspace(max(min_y_plus, 0.5), 8.0, 30)
+        fig.add_trace(
+            go.Scatter(
+                x=y_visc, y=y_visc, mode="lines",
+                line=dict(color="rgba(45,55,72,0.35)", width=1.5, dash="dot"),
+                name="Viscous sublayer u+=y+",
+            )
+        )
+        max_y_plus = float(y_plus.max()) if y_plus.size > 0 else 30.0
+        y_log = np.geomspace(20.0, max(max_y_plus, 30.0), 60)
+        kappa, B = 0.41, 5.0
+        fig.add_trace(
+            go.Scatter(
+                x=y_log, y=(1 / kappa) * np.log(y_log) + B, mode="lines",
+                line=dict(color="rgba(45,55,72,0.35)", width=1.5, dash="dash"),
+                name="Log-law reference",
+            )
+        )
+
+        return _transparent_layout(fig, "y⁺ (wall units, log scale)", "u⁺", x_log=True)
 
 
 def plot_boundary_layer_growth(growth: GrowthData) -> go.Figure:
