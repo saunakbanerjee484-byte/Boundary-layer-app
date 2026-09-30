@@ -11,22 +11,49 @@ remaining right on the verge of separation everywhere -- i.e. it defines
 the steepest "legal" pressure-recovery curve C_p(x) for a diffuser or
 adverse-pressure-gradient body before separation is guaranteed.
 
-The criterion (in its standard turbulent form) is:
+The criterion (standard turbulent form, Cebeci & Bradshaw / Schlichting):
 
-    C_p * sqrt(x * dC_p/dx) * (10^-6 * Re_x)^(1/10) = S
+    C_p * sqrt(x * dC_p/dx) * (10^-6 * Re_x)^(-1/10) = S
 
 where S ~ 0.35-0.39 is Stratford's empirically calibrated constant
-(0.35 for the conservative/"incipient separation" case, used here).
+(0.35 for the conservative/"incipient separation" case, used here). Note
+the NEGATIVE 1/10 exponent on the Reynolds-number factor: higher local
+Re_x means a more energetic, mixing-rich turbulent layer that can sustain
+a *steeper* pressure-recovery slope for the same margin S, i.e. the
+allowable dC_p/dx must *increase* with Re_x. Since the Re-factor here
+*decreases* with Re_x (negative exponent), dividing S by a smaller number
+correctly yields a larger allowable dC_p/dx as Re_x grows. (An earlier
+revision of this module used a POSITIVE exponent in the code while
+displaying the correct negative exponent in the on-screen LaTeX -- a
+plus/minus contradiction between what was computed and what was shown.
+Both are now the same, literature-consistent negative exponent.)
 
-We treat this as a *design* criterion: given the plate length and the
-dp/dx slider (mapped to an overall pressure-recovery target C_p,end), we
-solve, at each x, for the local dC_p/dx that makes the left-hand side
-exactly equal to the Stratford constant S -- i.e. the critical/limiting
-pressure-recovery slope. Integrating that critical slope forward gives the
-steepest C_p(x) the layer can tolerate without separating; comparing it to
-the *user's requested* recovery (set by the dp/dx slider) tells us whether
-their prescribed recovery is more or less aggressive than the physical
-limit, i.e. whether/where separation is predicted.
+REFACTOR NOTE (physical-accuracy pass)
+---------------------------------------
+Two issues have been corrected in this module:
+
+  1. The per-step solve previously clamped `cp_safe = max(cp, 1e-6)`
+     before evaluating the criterion. Since dC_p/dx ~ 1/cp^2, this
+     artificial floor produced a huge, unphysical initial pressure-
+     recovery slope at the very first station (where the true value is
+     C_p = 0, i.e. no recovery has occurred yet). That floor has been
+     removed. Instead, the ODE is regularized analytically: writing
+     w = C_p^3 and differentiating, Stratford's relation becomes
+
+         dw/dx = d(C_p^3)/dx = 3 * C_p^2 * dC_p/dx
+                = 3 * S^2 / (x * re_factor(x)^2)
+
+     which no longer contains C_p on the right-hand side at all -- the
+     apparent singularity at C_p = 0 was only an artifact of solving for
+     dC_p/dx directly, not a true singularity of the underlying physics.
+     This regularized form gives a well-posed, physically defensible
+     initial slope starting exactly from C_p(x0) = 0 (the correct
+     physical initial condition: pressure recovery has not yet begun at
+     the start of the domain), with no arbitrary floor required. Every
+     station after the first has C_p > 0 naturally and is solved with
+     the original (now correctly-signed) root-finding formulation.
+
+  2. The exponent sign contradiction described above.
 """
 
 from __future__ import annotations
@@ -45,31 +72,41 @@ from physics_engine.base_model import (
 from physics_engine.registry import register_model
 
 
+def _re_factor(re_x: float, negative_tenth_power: bool = True) -> float:
+    """
+    The Reynolds-number factor (10^-6 * Re_x)^(-1/10) from Stratford's
+    criterion. Kept as its own function so the sign is defined in exactly
+    one place and both the numeric solve and the docstring/LaTeX above
+    stay in agreement by construction.
+    """
+    base = 1e-6 * max(re_x, 1.0)
+    exponent = -0.1 if negative_tenth_power else 0.1
+    return base ** exponent
+
+
 def _critical_dcpdx(cp: float, x: float, re_x: float, S: float) -> float:
     """
-    Solve Stratford's criterion, C_p * sqrt(x * dCp/dx) * (1e-6*Re_x)^0.1 = S,
+    Solve Stratford's criterion, C_p * sqrt(x * dCp/dx) * re_factor = S,
     for the critical (maximum-sustainable) local pressure-recovery slope
-    dCp/dx at a given station. Rearranged algebraically (closed form, but we
-    still route it through `scipy.optimize.root_scalar` as requested so the
-    solve is explicit and could be swapped for a non-closed-form variant of
-    the criterion without touching the rest of the model).
+    dCp/dx at a given station, given the ALREADY-POSITIVE C_p carried
+    forward from the previous station (the singular first step, where
+    C_p = 0, is handled separately in `_critical_cp_curve` via an exact
+    closed-form integral -- see that method's docstring).
     """
-    cp_safe = max(cp, 1e-6)
     x_safe = max(x, 1e-9)
-    re_factor = (1e-6 * max(re_x, 1.0)) ** 0.1
+    re_f = _re_factor(re_x)
 
     def residual(dcpdx: float) -> float:
         # dcpdx must be >= 0 for a physically meaningful pressure recovery;
         # sqrt requires x*dcpdx >= 0, guaranteed since x > 0 on our domain.
-        return cp_safe * np.sqrt(x_safe * dcpdx) * re_factor - S
+        return cp * np.sqrt(x_safe * dcpdx) * re_f - S
 
-    # The criterion is analytically invertible (dcpdx = (S/(cp*re_factor))^2/x),
+    # The criterion is analytically invertible (dcpdx = (S/(cp*re_f))^2/x),
     # so we use that closed-form value purely to *center* a guaranteed-valid
-    # bracket for scipy's bracketed root-finder -- root_scalar still does the
-    # actual solve, but this keeps it robust across the full range of cp/x/Re
-    # the app sweeps through (a fixed bracket can otherwise fail to bracket a
-    # sign change when cp is very small or very large).
-    analytic_estimate = (S / (cp_safe * re_factor)) ** 2 / x_safe
+    # bracket for scipy's bracketed root-finder -- root_scalar still does
+    # the actual solve, but this keeps it robust across the full range of
+    # cp/x/Re the app sweeps through.
+    analytic_estimate = (S / (cp * re_f)) ** 2 / x_safe
     lo = max(analytic_estimate * 1e-8, 1e-12)
     hi = max(analytic_estimate * 1e8, 1.0)
 
@@ -94,16 +131,34 @@ class StratfordModel(BoundaryLayerModel):
         )
 
     def _critical_cp_curve(self, conditions: FlowConditions):
-        x = np.linspace(conditions.x_max * 1e-3, conditions.x_max, N_X_POINTS)
+        x = np.geomspace(conditions.x_max * 1e-3, conditions.x_max, N_X_POINTS)
         # Local Reynolds number based on distance from the start of pressure
         # recovery (e.g. downstream of a suction peak / diffuser throat).
         re_x = conditions.U * x / conditions.nu
 
         cp = np.zeros_like(x)
-        # March forward integrating the critical dCp/dx at each station --
-        # this traces out Stratford's limiting pressure-recovery envelope,
-        # the fastest recovery possible without separating anywhere upstream.
-        for i in range(1, len(x)):
+        # Physical initial condition: no pressure recovery has occurred at
+        # the start of the domain, C_p(x[0]) = 0. Since Re_x = U*x/nu is
+        # linear in x, re_factor(x) = (1e-6*Re_x)^(-1/10) is an exact power
+        # law in x, so dw/dx = 3*S^2/(x*re_factor(x)^2) is also an exact
+        # power law (~x^-0.8) and integrates in closed form over the first
+        # interval -- giving an EXACT first step rather than a crude Euler
+        # estimate (a single Euler step here was found to badly
+        # over-predict the initial Cp rise on a linear grid, since the
+        # true solution is steepest exactly where x is smallest). Using a
+        # log-spaced grid (geomspace) additionally keeps every subsequent
+        # step proportionally small near x0, where the criterion is most
+        # sensitive to x.
+        S = STRATFORD_SEPARATION_CONSTANT
+        K = (1e-6 * conditions.U / conditions.nu) ** (-0.2)
+        w1 = (15.0 * S**2 / K) * (x[1] ** 0.2 - x[0] ** 0.2)  # C_p(x[1])^3
+        cp[1] = np.cbrt(max(w1, 0.0))
+
+        # March forward integrating the critical dCp/dx at each remaining
+        # station -- this traces out Stratford's limiting pressure-recovery
+        # envelope, the fastest recovery possible without separating
+        # anywhere upstream.
+        for i in range(2, len(x)):
             dcpdx = _critical_dcpdx(
                 cp[i - 1], x[i - 1], re_x[i - 1], STRATFORD_SEPARATION_CONSTANT
             )

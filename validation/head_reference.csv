@@ -1,0 +1,33 @@
+# head_reference.csv
+#
+# Stub for published benchmark data used to validate
+# physics_engine/models/turbulent_head.py (Head's entrainment method)
+# against reference turbulent boundary-layer solutions or experimental
+# data.
+#
+# Populate one row per validation station with:
+#   x_m            - streamwise distance from the reference start
+#                    station [m]
+#   U_ms           - local free-stream velocity U(x) prescribed for that
+#                    reference case [m/s]
+#   theta_ref_m    - reference (published/experimental) momentum
+#                    thickness [m] at that station
+#   H_ref          - reference shape factor H = delta*/theta at that
+#                    station
+#   Cf_ref         - reference skin-friction coefficient at that station
+#   source         - short citation key for where this row's numbers
+#                    come from (e.g. "Stanford Olympics 1968 Case 1400",
+#                    a DOI, or a report/figure reference)
+#
+# Suggested reference sources to populate this file from:
+#   - The 1968 AFOSR-IFP-Stanford Conference ("Stanford Olympics")
+#     collection of well-documented equilibrium and non-equilibrium
+#     turbulent boundary-layer test cases (e.g. Case 1400 - mild APG,
+#     Case 2400 - strong APG) -- the standard benchmark suite Head's
+#     and other integral methods are traditionally validated against.
+#   - Coles & Hirst (eds.), "Computation of Turbulent Boundary Layers -
+#     1968 AFOSR-IFP-Stanford Conference, Vol. II: Compiled Data".
+#   - Any other documented experimental turbulent APG boundary-layer
+#     dataset with U(x), theta(x), H(x) reported.
+#
+x_m,U_ms,theta_ref_m,H_ref,Cf_ref,source

@@ -1,0 +1,32 @@
+# thwaites_reference.csv
+#
+# Stub for published benchmark data used to validate
+# physics_engine/models/laminar_thwaites.py (Thwaites' laminar
+# momentum-integral method) against reference laminar boundary-layer
+# solutions or experimental data.
+#
+# Populate one row per validation station with:
+#   x_m            - streamwise distance from the leading edge [m]
+#   U_ms           - local free-stream velocity U(x) prescribed for that
+#                    reference case [m/s]
+#   theta_ref_m    - reference (published/exact) momentum thickness [m]
+#                    at that station, e.g. from an exact Falkner-Skan
+#                    wedge-flow solution or a tabulated experimental
+#                    laminar boundary-layer dataset
+#   lambda_ref     - reference Thwaites pressure-gradient parameter
+#                    lambda = (theta^2/nu) dU/dx at that station
+#   source         - short citation key for where this row's numbers
+#                    come from (e.g. "Falkner-Skan m=0", "Schlichting
+#                    Table 7.1", a DOI, or a report/figure reference)
+#
+# Suggested reference sources to populate this file from:
+#   - Falkner-Skan exact similarity solutions for a range of wedge
+#     angles (beta_FS), which give exact theta(x) and lambda(x) for
+#     comparison against Thwaites' approximate integral method.
+#   - Schlichting & Gersten, "Boundary-Layer Theory", tabulated laminar
+#     boundary-layer data.
+#   - Experimental laminar-flow datasets with documented U(x) (e.g.
+#     classical wind-tunnel studies on mildly accelerating/decelerating
+#     flat plates).
+#
+x_m,U_ms,theta_ref_m,lambda_ref,source

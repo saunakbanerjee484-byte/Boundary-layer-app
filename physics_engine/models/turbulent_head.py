@@ -228,9 +228,29 @@ class HeadEntrainmentModel(BoundaryLayerModel):
 
         separated = x_separation is not None
         if separated:
-            # Zero out tau_w downstream of the H=2.4 separation point,
-            # since the entrainment closure is no longer physically valid
-            # there (the boundary-layer approximation itself breaks down).
+            # NOTE: Setting wall shear stress to zero post-separation is a
+            # termination convention for visualization purposes and does
+            # not represent physical post-stall calculations.
+            #
+            # Head's entrainment closure (like the von Karman momentum
+            # integral it's coupled to) is derived under the thin-shear-
+            # layer / attached-boundary-layer assumption. Once H crosses
+            # the empirical separation threshold (HEAD_SEPARATION_H), that
+            # assumption is no longer valid: real separated/stalled flow
+            # involves reverse flow, large-scale unsteadiness, and a
+            # breakdown of the boundary-layer approximation itself (finite
+            # v/u, non-negligible streamwise diffusion) that this 1D
+            # integral method cannot represent. We do NOT attempt to
+            # continue marching theta/H past this point (the ODE's own
+            # empirical correlations, e.g. Ludwieg-Tillmann Cf(H, Re_theta),
+            # are curve-fits over attached-flow data and are not meaningful
+            # extrapolated into H > ~3). Flooring tau_w to exactly zero
+            # downstream of x_separation is therefore a deliberate plotting
+            # choice -- it communicates "the model stops trusting its own
+            # output here" -- and should NOT be read as a claim that real
+            # post-separation wall shear is uniformly zero (in reality it
+            # is small, sign-indeterminate, and unsteady in the recirculating
+            # region).
             idx = np.searchsorted(x, x_separation)
             tau_w = tau_w.copy()
             tau_w[idx:] = 0.0

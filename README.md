@@ -1,138 +1,238 @@
-# 🌊 Turbulent & Laminar Boundary-Layer Studio
+# Turbulent & Laminar Boundary-Layer Studio
 
-> A high-performance, CPU-only interactive computational fluid dynamics (CFD) sandbox built for engineers, researchers, and students. Explore, simulate, and visualize classical boundary-layer theory and separation criteria in real-time.
+A CPU-only, GPU-free, neural-network-free interactive computational fluid
+dynamics (CFD) sandbox for exploring seven classical laminar and turbulent
+boundary-layer models behind a Streamlit front end. Built on NumPy and
+SciPy deterministic solvers (`solve_bvp`, `solve_ivp`, `newton`, `quad`,
+`root_scalar`) — no PINNs, no CUDA, no stochastic approximation.
 
 ---
 
-## 🚀 Quick Start
+## Problem
 
-Ensure you have Python 3.9+ installed, then run the following commands in your terminal:
+Predicting how a boundary layer grows, how its velocity profile is shaped,
+and — critically — where and whether it separates from a surface is a
+central problem in aerodynamics and internal-flow design (wings, diffusers,
+turbine blades, nozzles). Full Navier–Stokes CFD is accurate but
+computationally heavy and poorly suited to an interactive, real-time
+teaching/design tool. This project instead implements seven classical
+*reduced-order* boundary-layer theories — similarity solutions, empirical
+inner/outer-region closures, and integral momentum methods — each valid
+over a specific regime (laminar/turbulent, zero/adverse pressure gradient),
+and lets a user compare their predictions of velocity profile, growth, wall
+shear, and separation onset in real time on ordinary CPU hardware.
+
+---
+
+## Mathematical Formulation
+
+| # | Model | Regime | Governing Relation |
+|---|-------|--------|---------------------|
+| 1 | Blasius Exact Solution | Laminar, ZPG | `2f''' + f f'' = 0`, `f(0)=0, f'(0)=0, f'(∞)=1` |
+| 2 | Prandtl's 1/7th Power Law | Turbulent, ZPG | `ū/U = (y/δ)^(1/7)` |
+| 3 | Spalding's Single Formula | Turbulent, inner region | `y⁺ = u⁺ + e^{-κB}[e^{κu⁺} - 1 - κu⁺ - (κu⁺)²/2 - (κu⁺)³/6]` |
+| 4 | Coles' Law of the Wake | Turbulent, APG outer region | `u⁺ = (1/κ)ln(y⁺) + B + (2Π/κ)sin²(πy/2δ)`, `Π ≈ 0.8(β+0.5)^{3/4}`, `β = (δ*/τ_w)(dp/dx)` |
+| 5 | Thwaites' Method | Laminar separation predictor | `λ = (θ²/ν)(dU/dx)`; separation at `λ = -0.09` |
+| 6 | Head's Entrainment Method | Turbulent APG & separation | von Kármán momentum integral + entrainment closure on `H = δ*/θ`; separation flagged at `H ≈ 2.4` |
+| 7 | Stratford's Separation Criterion | Turbulent, design-limit case | `C_p(x·dC_p/dx)^{1/2}(10⁻⁶Re_x)^{-1/10} = S ≈ 0.35` |
+
+Universal constants (von Kármán constant `κ = 0.41`, log-law intercept
+`B = 5.0`) are centralized in `config.py`.
+
+---
+
+## Numerical Methods
+
+- **Blasius (Model 1):** third-order similarity ODE reduced to a first-order
+  system and solved as a two-point boundary-value problem with
+  `scipy.integrate.solve_bvp`.
+- **Prandtl 1/7th (Model 2):** direct vectorized NumPy algebra, no solver.
+- **Spalding (Model 3):** implicit in `u⁺`; inverted per-point with
+  `scipy.optimize.newton`.
+- **Coles (Model 4):** the wake-strength parameter `Π` is *derived*, not
+  assumed — it is obtained from the Clauser pressure-gradient parameter
+  `β = (δ*/τ_w)(dp/dx)` via the standard equilibrium-layer correlation
+  `Π ≈ 0.8(β+0.5)^{3/4}`. Growth, momentum thickness `θ`, shape factor `H`,
+  and wall shear `τ_w` are obtained by *reusing* Head's rigorous von
+  Kármán momentum-integral + entrainment march (Model 6) rather than an
+  independent, ad hoc growth law — Coles' distinct theoretical
+  contribution is the outer-region *profile shape*, not a separate growth
+  model.
+- **Thwaites (Model 5):** the momentum-thickness integral is evaluated with
+  `scipy.integrate.quad`.
+- **Head (Model 6):** the coupled `[θ, H₁·θ]` ODE system is marched
+  downstream with `scipy.integrate.solve_ivp` (RK45), with a terminal-free
+  event watching for the `H = 2.4` separation threshold.
+- **Stratford (Model 7):** at each downstream station, the critical
+  pressure-recovery slope `dC_p/dx` is solved with
+  `scipy.optimize.root_scalar` (Brent's method). The very first station
+  (`C_p = 0` by definition — no recovery has yet occurred) is handled via
+  an exact closed-form integral of the regularized substitution
+  `w = C_p³` (under which the governing relation is no longer singular at
+  `C_p = 0`), rather than an arbitrary numerical floor on `C_p`, and the
+  march uses a log-spaced streamwise grid so step sizes stay proportionally
+  small near the start of the recovery region.
+
+---
+
+## Validation
+
+- **`tests/test_blasius.py`** — solves the Blasius BVP with the exact
+  solver the app uses and asserts the dimensionless wall-shear parameter
+  matches the accepted literature benchmark `f''(0) ≈ 0.33206` (Howarth's
+  refined tabulation of Blasius' 1908 solution) to within `1e-4`, plus
+  boundary-condition and monotonicity sanity checks.
+- **`tests/validation_utils.py`** — a `relative_error_percent(q_model,
+  q_reference)` utility implementing
+  `ε = |q_model − q_reference| / |q_reference| × 100%`, plus a loader for
+  the `validation/*.csv` reference files.
+- **`validation/thwaites_reference.csv`** and **`validation/head_reference.csv`**
+  — stub CSVs with a documented schema and suggested literature sources
+  (Falkner–Skan exact solutions for Thwaites; the 1968 AFOSR-IFP-Stanford
+  "Stanford Olympics" turbulent boundary-layer dataset for Head). Populate
+  either file and the corresponding `test_*_against_reference_data` test in
+  `tests/test_validation_utils.py` automatically activates (currently
+  `SKIPPED` against the empty stubs, asserting ≤5% relative error once
+  populated).
+
+Run the suite with:
 
 ```bash
-git clone https://github.com/your-username/boundary-layer-app.git
-cd boundary-layer-app
+pip install -r requirements-dev.txt
+pytest
+```
+
+---
+
+## Model Limitations
+
+- **Pressure-gradient closures are simplified U(x)/dp/dx models, not a
+  coupled outer-flow solve.** Every APG/FPG model (Thwaites, Head, Coles,
+  Stratford) maps the UI's single dimensionless `dp/dx` slider onto a
+  *prescribed* linear edge-velocity distribution `U(x)`; there is no
+  two-way coupling with an actual body geometry or outer potential-flow
+  solution. The physical pressure gradient used by Coles'
+  `β = (δ*/τ_w)(dp/dx)` is derived from this same prescribed `U(x)` via
+  Bernoulli (`dp/dx = −ρU·dU/dx`), so it is only as physically meaningful
+  as that linear `U(x)` assumption.
+- **Coles' wake parameter Π is a simplification at ZPG.** The equilibrium
+  correlation `Π ≈ 0.8(β+0.5)^{3/4}` returns `Π = 0` exactly at `β = 0`
+  (flat plate); real ZPG layers carry a small residual wake (`Π ≈ 0.45–0.6`)
+  from outer-layer intermittency that this model does not reproduce.
+- **Separation criteria are empirical thresholds, not universal
+  constants.** Thwaites' `λ = -0.09`, Head's `H ≈ 2.4`, and Stratford's
+  `S ≈ 0.35` are each fitted to specific historical datasets; real
+  separation onset for a given geometry can deviate from these thresholds,
+  and all three lose validity as the boundary-layer approximation itself
+  breaks down near/after separation.
+- **Head's post-separation `τ_w = 0` is a visualization convention, not a
+  physical claim.** Once `H` crosses 2.4, the entrainment closure's
+  empirical correlations (fitted to attached-flow data) are no longer
+  trustworthy, so the march is not continued; wall shear is floored to
+  zero downstream purely so the plot communicates "the model stops here,"
+  not that real post-stall wall shear is uniformly zero (in reality it is
+  small, sign-indeterminate, and unsteady in the recirculating region).
+- **Stratford is an inverse design-limit criterion, not a forward
+  simulation.** It computes the steepest pressure-recovery curve a
+  turbulent layer can sustain while remaining everywhere on the brink of
+  separation (`τ_w ≈ 0`); it does not march a prescribed, independently
+  specified pressure distribution the way Thwaites/Head do.
+- **No transition model.** None of the seven models predicts
+  laminar-to-turbulent transition; the user (or the model selection
+  itself) determines which regime applies.
+- **2D, incompressible, steady-state only.** No 3D cross-flow, no
+  compressibility, no unsteadiness.
+
+---
+
+## Installation
+
+Requires Python 3.9+.
+
+```bash
+git clone https://github.com/saunakbanerjee484-byte/Boundary-layer-app.git
+cd Boundary-layer-app
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
----
+For running the test suite:
 
-## 🏛️ System Architecture & Modular Design
-
-The application is engineered with a strict separation of concerns between the computational physics backend and the Streamlit frontend. It utilizes a **Decorator-Based Registry Pattern**, meaning you can drop a new model into the system without ever touching the UI or routing code.
-
-```text
-boundary_layer_app/
-├── app.py                     # Main Streamlit entry point (UI logic & wiring)
-├── config.py                  # Global physical constants and slider ranges
-├── ui/
-│   ├── __init__.py
-│   ├── theme.py               # "Whitish Glassmorphism" custom CSS injection
-│   └── visualizations.py      # Transparent Plotly interactive graph generators
-└── physics_engine/
-    ├── __init__.py
-    ├── registry.py            # Central model registry (@register_model)
-    ├── base_model.py          # Abstract Base Class enforcing the simulation contract
-    └── models/                # Plug-and-play directory for physics models
-        ├── __init__.py        # Auto-imports models to trigger decorators
-        ├── zpg_blasius.py     # Model 1: Blasius Exact Solution
-        ├── zpg_prandtl.py     # Model 2: Prandtl's 1/7th Power Law
-        ├── inner_spalding.py  # Model 3: Spalding's Single Formula
-        ├── apg_coles_wake.py  # Model 4: Coles' Law of the Wake
-        ├── laminar_thwaites.py# Model 5: Thwaites' Method
-        ├── turbulent_head.py  # Model 6: Head's Entrainment Method
-        └── apg_stratford.py   # Model 7: Stratford's Separation Criterion
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ---
 
-## 📐 The Mathematical Engine & 7 Core Models
+## References
 
-Every model is computed strictly on the CPU using optimized NumPy vectorization and SciPy numerical solvers (`solve_ivp`, `solve_bvp`, `newton`, `quad`, `root_scalar`). No GPUs or neural networks are used.
-
-### 1. Blasius Exact Solution (Laminar Baseline)
-
-The foundational laminar boundary-layer solution over a flat plate, derived by reducing the Navier-Stokes equations via similarity variables.
-
-- **Governing Equation:** $2f''' + f f'' = 0$
-- **Numerical Method:** Solved via a shooting method or `scipy.integrate.solve_bvp`.
-- **Physical Insight:** Establishes the clean laminar baseline before momentum-mixing turbulent eddies alter the velocity distribution.
-
-### 2. Prandtl's 1/7th Power Law (ZPG Empirical)
-
-A lightweight algebraic approximation for turbulent flow under a Zero Pressure Gradient (ZPG).
-
-- **Governing Equation:** $\dfrac{\bar{u}}{U} = \left(\dfrac{y}{\delta}\right)^{1/7}$
-- **Numerical Method:** Direct vectorized NumPy evaluations.
-- **Physical Insight:** Generates a blunter profile near the wall compared to laminar flow, reflecting increased momentum transfer.
-
-### 3. Spalding's Single Formula (Seamless Inner Region)
-
-Standard logarithmic profiles fail in the buffer layer ($5 < y^+ < 30$). Spalding formulated a single implicit equation that bridges the viscous sublayer, buffer layer, and log-law region seamlessly.
-
-- **Governing Equation:** $y^+ = u^+ + e^{-\kappa B} \left[ e^{\kappa u^+} - 1 - \kappa u^+ - \dfrac{(\kappa u^+)^2}{2} - \dfrac{(\kappa u^+)^3}{6} \right]$
-- **Numerical Method:** Inverted via `scipy.optimize.newton` to solve for $u^+$ given $y^+$.
-- **Physical Insight:** Eliminates piecewise calculation errors and smooths out the transition zone near the solid boundary.
-
-### 4. Coles' Law of the Wake (APG Outer Region Deformation)
-
-When an Adverse Pressure Gradient ($\frac{dp}{dx} > 0$) opposes the flow, the outer region departs from the standard log-law. Coles added a wake parameter ($\Pi$) to capture this phenomenon.
-
-- **Governing Equation:** $u^+ = \dfrac{1}{\kappa} \ln(y^+) + B + \dfrac{2\Pi}{\kappa} \sin^2\left(\dfrac{\pi y}{2\delta}\right)$
-- **Numerical Method:** Algebraic evaluation where the user's pressure-gradient slider directly controls $\Pi$.
-- **Physical Insight:** Visualizes how adverse pressure forces the upper half of the velocity profile to bulge outward and decelerate.
-
-### 5. Thwaites' Method (Laminar Separation Predictor)
-
-A robust integral method to track momentum thickness and predict laminar boundary-layer separation under arbitrary pressure gradients.
-
-- **Governing Equation:** Uses the dimensionless momentum parameter $\lambda = \dfrac{\theta^2}{\nu} \dfrac{dU}{dx}$. Separation occurs precisely at $\lambda = -0.09$.
-- **Numerical Method:** Evaluated using `scipy.integrate.quad`.
-- **Physical Insight:** Identifies the precise coordinate where laminar fluid detaches from a surface.
-
-### 6. Head's Entrainment Method (Turbulent APG & Separation)
-
-The industry-standard integral approach for turbulent boundary layers, tracking how free-stream fluid is "entrained" into the turbulent layer.
-
-- **Governing Equation:** Solves coupled ODEs of the von Kármán momentum integral and entrainment equations based on Shape Factor $H = \delta^* / \theta$.
-- **Numerical Method:** `scipy.integrate.solve_ivp` marched along the stream coordinate $x$.
-- **Physical Insight:** Triggers an automated UI alert when $H$ exceeds critical thresholds ($H \approx 2.4 - 3.0$), signaling turbulent detachment.
-
-### 7. Stratford's Separation Criterion (The Limit Case)
-
-An analytical limit-case criterion designed to calculate the maximum permissible adverse pressure gradient a system can sustain without inducing separation ($\tau_w = 0$).
-
-- **Governing Equation:** $C_p \left( x \dfrac{dC_p}{dx} \right)^{1/2} (10^{-6} Re_x)^{-1/10} = \text{Constant}$
-- **Numerical Method:** Root-finding via `scipy.optimize.root_scalar`.
-- **Physical Insight:** Serves as a "Design Mode" for engineering diffusers and fluid channels safely beneath failure thresholds.
+- Blasius, H. (1908). *Grenzschichten in Flüssigkeiten mit kleiner Reibung*.
+- Howarth, L. (1938). *On the Solution of the Laminar Boundary Layer
+  Equations*. Proc. Roy. Soc. A.
+- Prandtl, L. — the empirical 1/7th-power turbulent velocity profile, as
+  presented in standard boundary-layer texts (e.g. Schlichting & Gersten,
+  *Boundary-Layer Theory*).
+- Spalding, D. B. (1961). *A Single Formula for the "Law of the Wall"*.
+  J. Appl. Mech.
+- Coles, D. (1956). *The Law of the Wake in the Turbulent Boundary Layer*.
+  J. Fluid Mech.
+- Clauser, F. H. (1954). *Turbulent Boundary Layers in Adverse Pressure
+  Gradients*. J. Aeronaut. Sci. — source of the equilibrium parameter `β`.
+- White, F. M. *Viscous Fluid Flow* — equilibrium-layer `Π(β)` correlation.
+- Thwaites, B. (1949). *Approximate Calculation of the Laminar Boundary
+  Layer*. Aeronaut. Quart.
+- Head, M. R. (1958). *Entrainment in the Turbulent Boundary Layer*. ARC
+  R&M 3152.
+- Ludwieg, H. & Tillmann, W. (1950). *Investigations of the Wall-Shearing
+  Stress in Turbulent Boundary Layers*. NACA TM 1285.
+- Stratford, B. S. (1959). *The Prediction of Separation of the Turbulent
+  Boundary Layer*. J. Fluid Mech.
+- Coles, D. E. & Hirst, E. A. (eds., 1968). *Computation of Turbulent
+  Boundary Layers — 1968 AFOSR-IFP-Stanford Conference*. (Source of the
+  "Stanford Olympics" reference cases suggested for `head_reference.csv`.)
 
 ---
 
-## 🎨 UI/UX Design Language
+## Architecture
 
-The app features a custom **"Whitish Glassmorphism"** theme injected via CSS:
+A decorator-based registry pattern decouples the physics engine from the
+UI: `app.py` never imports a concrete model class, only
+`physics_engine.registry.get_model(key)`. Adding model #8 requires only a
+new file in `physics_engine/models/` implementing `BoundaryLayerModel`,
+decorated with `@register_model("key")`, plus one import line in
+`physics_engine/models/__init__.py` — no changes to `app.py` or
+`ui/visualizations.py`.
 
-- **Canvas:** Clean off-white background (`#F8F9FA`).
-- **Glass Containers:** Semi-transparent frosted glass cards (`rgba(255, 255, 255, 0.6)`) with `backdrop-filter: blur(12px)` and subtle shadow layering.
-- **Dynamic Equations:** Renders live LaTeX formulas (`st.latex()`) corresponding to the active model directly on the dashboard.
-- **Interactive Visuals:** Zero-latency Plotly charts featuring semi-log velocity profiles, spatial growth curves ($\delta(x)$), and shear-stress profiles ($\tau_w(x)$) with live separation markers.
-
----
-
-## 🔌 Extending the Engine (Adding Model #8)
-
-Thanks to the registry pattern, adding a new model takes less than 3 minutes:
-
-1. Create a new file under `physics_engine/models/my_new_model.py`.
-2. Inherit from `BoundaryLayerModel` and implement the required methods.
-3. Decorate the class with `@register_model("my_new_model")`.
-4. Import your new module in `physics_engine/models/__init__.py`.
-
-The UI dropdown updates automatically.
-# 🌬️ Boundary-Layer Studio
-
-A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seven classical laminar and turbulent boundary-layer models run behind a polymorphic Streamlit frontend, with no GPU and no machine learning.
-
+```text
+.
+├── app.py
+├── config.py
+├── conftest.py
+├── requirements.txt
+├── requirements-dev.txt
+├── ui/
+│   ├── theme.py
+│   └── visualizations.py
+├── physics_engine/
+│   ├── base_model.py
+│   ├── registry.py
+│   └── models/
+│       ├── zpg_blasius.py
+│       ├── zpg_prandtl.py
+│       ├── inner_spalding.py
+│       ├── apg_coles_wake.py
+│       ├── laminar_thwaites.py
+│       ├── turbulent_head.py
+│       └── apg_stratford.py
+├── tests/
+│   ├── test_blasius.py
+│   ├── test_validation_utils.py
+│   └── validation_utils.py
+└── validation/
+    ├── thwaites_reference.csv
+    └── head_reference.csv
+```
 ## Contents
 
 - [Roadmap](#roadmap-upcoming-features)
@@ -163,21 +263,21 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 **👶 ELI5:** Imagine honey flowing smoothly over a flat glass table. The layers slide over each other perfectly without mixing. This math finds exactly how the bottom layer sticks to the glass (velocity = 0) while the top layer moves fast with the air. It's the perfect, undisturbed baseline of fluid flow.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > Derived via a similarity transformation of the 2D steady, incompressible Navier-Stokes and continuity equations (`u ∂u/∂x + v ∂u/∂y = ν ∂²u/∂y²`). By introducing the stream function ψ and the similarity variable `η = y√(U/(νx))`, the partial differential equations are rigorously reduced to a single third-order nonlinear ordinary differential equation: `2f''' + ff'' = 0` with boundary conditions `f(0) = 0, f'(0) = 0, f'(∞) = 1`. The numerical engine resolves this two-point boundary value problem using a shooting method integrated with a high-order SciPy boundary-value solver (`scipy.integrate.solve_bvp`). This provides the exact baseline for laminar momentum thickness θ and displacement thickness δ\*, representing a flow regime strictly governed by viscous diffusion without macroscopic turbulent momentum exchange.
 
 ## 2. Prandtl's 1/7th Power Law (ZPG Empirical)
 
 **👶 ELI5:** If you stir the honey really fast, it gets chaotic and mixes (turbulent flow). Because of all this tumbling and mixing, the fluid near the bottom gets dragged along faster than it did in smooth flow. The 1/7th law is a quick, famous engineering shortcut to draw this blunt, turbulent shape mathematically.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > Serves as a foundational empirical approximation for turbulent zero-pressure-gradient (ZPG) boundary layers. Unlike laminar solutions, the turbulent velocity profile exhibits a significantly blunter shape due to macroscopic eddy momentum transfer. The phenomenological 1/7th power law, `ū/U = (y/δ)^(1/7)`, bypasses complex turbulence closure models (like k-ε) by directly enforcing a semi-empirical fit to experimental pipe-flow data. While it inaccurately yields infinite shear stress at the exact wall boundary (`∂u/∂y → ∞` at `y = 0`), it provides highly accurate momentum integral evaluations for engineering applications. The engine processes this entirely through ultra-fast vectorized NumPy arrays, establishing the fundamental macroscopic turbulent scaling behavior before introducing advanced inner-region models.
 
 ## 3. Spalding's Single Formula (Seamless Inner Region)
 
 **👶 ELI5:** Normally, engineers use two different math equations for fluid touching the wall and fluid far from the wall, stitching them together clunkily. Spalding wrote one "magic" equation that smoothly curves and connects everything from the sticky wall all the way into the chaotic outer zone without breaking or glitching.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > Classical wall-bounded turbulence relies on a piecewise matching of the viscous sublayer (`u⁺ = y⁺`) and the logarithmic overlap region (`u⁺ = (1/κ) ln(y⁺) + B`). This creates non-physical mathematical discontinuities in the buffer layer (5 < y⁺ < 30). Spalding's unified formulation expresses `y⁺` as a continuous function of `u⁺` across all inner regions:
 >
 > `y⁺ = u⁺ + e^(−κB) [ e^(κu⁺) − 1 − κu⁺ − (κu⁺)²/2 − (κu⁺)³/6 ]`
@@ -188,7 +288,7 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 **👶 ELI5:** When fluid flows into a widening pipe, the higher pressure ahead pushes back against it (Adverse Pressure). This makes the outer part of the fluid bulge out and slow down, like a running crowd hitting a bottleneck. Coles added a "wake" math function to perfectly draw this outward bulge.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > Addresses the structural deviation of the outer boundary layer under adverse pressure gradients (APG). The standard log-law applies only to inner wall-region equilibrium. Coles extended the velocity defect formulation by superimposing a wake function `W(y/δ)` modeled empirically via a sinusoidal distribution. The composite profile is:
 >
 > `u⁺ = (1/κ) ln(y⁺) + B + (2Π/κ) sin²(πy / 2δ)`
@@ -199,7 +299,7 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 **👶 ELI5:** Will the air stick to the airplane wing, or peel off and crash the plane? Thwaites' math quickly calculates the exact spot on the wing where smooth (laminar) air gives up and violently separates from the surface when it gets pushed too hard by pressure.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > Provides a robust integral solution for laminar boundary layers under arbitrary streamwise pressure gradients `U(x)`. By integrating the von Kármán momentum equation, Thwaites established a universal correlation for the momentum thickness:
 >
 > `θ² = 0.45 ν / U⁶ ∫₀ˣ U⁵ dx`
@@ -210,14 +310,14 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 **👶 ELI5:** Turbulent flow acts like a hungry sponge, "entraining" or sucking in clean, fast fluid from the outside. Head's method tracks exactly how fast this sucking happens. If the boundary layer gets too thick and sluggish, a "Shape Factor" alarm goes off, meaning the flow has officially detached (separated) from the surface.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > A widely used phenomenological method for turbulent boundary layers under adverse pressure gradients. It assumes the rate at which free-stream irrotational fluid is entrained into the turbulent boundary layer is a scalar function of the velocity defect profile, parameterized by the kinematic shape factor `H = δ*/θ`. The solver couples the von Kármán momentum integral equation with Head's empirical entrainment closure. These coupled ODEs are marched along the stream coordinate x using `scipy.integrate.solve_ivp`. The separation alert triggers when the shape factor reaches the empirical detachment threshold (`H ≈ 2.4–3.0`), signaling boundary-layer blow-off.
 
 ## 7. Stratford's Separation Criterion (The Limit Case)
 
 **👶 ELI5:** This is the absolute extreme limit. It calculates the maximum possible pressure a fluid flow can fight against before it gives up. Engineers use this limit to design the steepest, most aggressive jet engine nozzles possible without the air stalling and failing.
 
-> **🔬 Technical Rigor**
+> **🔬 Academic Rigor**
 > Defines the theoretical limit of pressure recovery a turbulent boundary layer can sustain while remaining in a continuous state of incipient separation (`τ_w ≈ 0`). Stratford's limit-case equation,
 >
 > `C_p (x · dC_p/dx)^(1/2) (10⁻⁶ Re_x)^(−1/10) = S`
@@ -282,25 +382,25 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 ### 1. The wall-singularity trap
 
-> **⚠️ 🙋‍♂️:** "If you differentiate `(y/δ)^(1/7)` with respect to y, the gradient approaches infinity at y = 0. That means infinite wall shear stress. How is this model physically valid?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "If you differentiate `(y/δ)^(1/7)` with respect to y, the gradient approaches infinity at y = 0. That means infinite wall shear stress. How is this model physically valid?"
 >
 > **🛡️ Defense:** It is explicitly not valid right at the wall, which is why it is a macroscopic empirical model, not a near-wall Navier-Stokes solution. The 1/7th profile is used to evaluate momentum thickness θ and displacement thickness δ\* across the bulk fluid. For actual wall shear stress τ_w, the engine bypasses the derivative singularity and uses Blasius' empirical pipe-flow drag correlation: `τ_w = 0.0225 ρU² (ν/(Uδ))^(1/4)`.
 
 ### 2. The Reynolds number limitation
 
-> **⚠️ 🙋‍♂️:** "The 1/7th power law isn't universal. Doesn't its accuracy degrade at extremely high flow speeds?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "The 1/7th power law isn't universal. Doesn't its accuracy degrade at extremely high flow speeds?"
 >
 > **🛡️ Defense:** Yes. The 1/7th exponent is empirically tuned for moderate Reynolds numbers (Re_x < 10⁷). For highly turbulent flows at massive scales, the exponent shifts toward 1/9 or 1/10. The architecture acknowledges this and positions the 1/7th law as a computational baseline for moderate flows before engaging advanced methods like Head's.
 
 ### 3. The missing viscous sublayer
 
-> **⚠️ 🙋‍♂️:** "Your 1/7th model ignores the viscous sublayer where `u⁺ = y⁺`. Are you ignoring viscosity entirely?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Your 1/7th model ignores the viscous sublayer where `u⁺ = y⁺`. Are you ignoring viscosity entirely?"
 >
 > **🛡️ Defense:** In macroscopic ZPG calculations, the viscous sublayer is less than 1% of the boundary-layer thickness δ. Integrating a piecewise sublayer for bulk momentum calculations yields negligible accuracy gains. When near-wall viscous accuracy is required, the engine routes the computation to Spalding's formula.
 
 ### 4. Why empirical over differential?
 
-> **⚠️ 🙋‍♂️:** "Why not a zero- or one-equation turbulence model like Spalart-Allmaras?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Why not a zero- or one-equation turbulence model like Spalart-Allmaras?"
 >
 > **🛡️ Defense:** Computational efficiency. A differential turbulence closure for a simple flat-plate ZPG adds large matrix-inversion overhead. The 1/7th law, run via vectorized NumPy arrays, computes the same bulk integral parameters instantly with no practical loss of engineering accuracy.
 
@@ -310,25 +410,25 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 ### 1. The computational overhead of root-finding
 
-> **⚠️ 🙋‍♂️:** "Spalding defines `y⁺` in terms of `u⁺`. To plot u vs y you must run `scipy.optimize.newton` at every point. Isn't that inefficient?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Spalding defines `y⁺` in terms of `u⁺`. To plot u vs y you must run `scipy.optimize.newton` at every point. Isn't that inefficient?"
 >
 > **🛡️ Defense:** Newton-Raphson inversion is heavier than an explicit algebraic evaluation, but the overhead is mitigated by NumPy's vectorized root-finding and by passing high-quality initial guesses from the standard log-law. The trade-off is C¹ continuity of the shear stress across the buffer layer, eliminating the non-physical kinks from piecewise stitching.
 
 ### 2. The asymptotic wall boundary condition
 
-> **⚠️ 🙋‍♂️:** "Does Spalding's equation naturally satisfy no-slip (`u = 0` at `y = 0`) without manual forcing?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Does Spalding's equation naturally satisfy no-slip (`u = 0` at `y = 0`) without manual forcing?"
 >
 > **🛡️ Defense:** Yes. In the limit `u⁺ → 0`, the exponential terms cancel via Taylor expansion, leaving exactly `y⁺ = u⁺`. That guarantees adherence to no-slip at the micro-scale.
 
 ### 3. The outer-region blindspot
 
-> **⚠️ 🙋‍♂️:** "Can I use Spalding's model all the way to the free stream (`y = δ`)?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Can I use Spalding's model all the way to the free stream (`y = δ`)?"
 >
 > **🛡️ Defense:** No. Spalding is strictly an inner-region law. It does not account for the velocity defect or wake mechanics in the outer ~80% of the boundary layer. That is why the architecture uses it for near-wall analysis and provides Coles' Law for full-domain APG scenarios.
 
 ### 4. The universal constants argument
 
-> **⚠️ 🙋‍♂️:** "Your code hardcodes `κ = 0.41` and `B = 5.0`. Are these truly universal?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Your code hardcodes `κ = 0.41` and `B = 5.0`. Are these truly universal?"
 >
 > **🛡️ Defense:** They remain debated in high-Reynolds experimental turbulence, but `κ ≈ 0.41` and `B ≈ 5.0` are the canonical standard for incompressible engineering flows. They are isolated as global configuration parameters (`config.py`), so they can be perturbed for specific fluid sensitivities without refactoring the core solver.
 
@@ -338,25 +438,25 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 ### 1. The arbitrary wake parameter (Π)
 
-> **⚠️ 🙋‍♂️:** "How is Π determined? Is it a random slider guess, or does it have physical grounding?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "How is Π determined? Is it a random slider guess, or does it have physical grounding?"
 >
 > **🛡️ Defense:** In the interactive sandbox, Π is user-controlled to visualize wake deformation. Physically, Π is coupled to the Clauser pressure-gradient parameter β. As the adverse pressure gradient `dp/dx` increases, Π scales upward, driving the outer profile to bulge and decelerate toward separation.
 
 ### 2. The disconnect at the boundary edge
 
-> **⚠️ 🙋‍♂️:** "Does `∂u/∂y` smoothly approach zero at the boundary edge (`y = δ`)?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Does `∂u/∂y` smoothly approach zero at the boundary edge (`y = δ`)?"
 >
 > **🛡️ Defense:** Yes. The sinusoidal wake function `W = sin²(πy/2δ)` has a derivative that goes to zero at `y = δ`. Superimposed with the log-law, it blends smoothly into the irrotational free stream, unlike a bare logarithmic profile.
 
 ### 3. Incipient separation via Coles
 
-> **⚠️ 🙋‍♂️:** "Can Coles' law predict when the boundary layer separates?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Can Coles' law predict when the boundary layer separates?"
 >
 > **🛡️ Defense:** Yes. Separation occurs when wall shear stress vanishes (`u_τ → 0`). In the Coles formulation this corresponds to the wake parameter reaching a critical limit (Π ≈ 0.8–1.0 depending on geometry). Beyond this, the inner log-law collapses, signaling detachment.
 
 ### 4. Failure in favorable pressure gradients (FPG)
 
-> **⚠️ 🙋‍♂️:** "What happens under a strong negative pressure gradient (acceleration)?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "What happens under a strong negative pressure gradient (acceleration)?"
 >
 > **🛡️ Defense:** Under strong FPGs, Π can become negative and the outer boundary layer is suppressed. The math still computes, but the "wake" concept loses phenomenological meaning as the flow relaminarizes. The UI frames Coles strictly as an APG (adverse) analysis tool.
 
@@ -366,25 +466,25 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 ### 1. The singularity at the leading edge (`x = 0`)
 
-> **⚠️ 🙋‍♂️:** "Thwaites' equation divides by U⁶. From a stagnation point where `U = 0`, don't you hit divide-by-zero?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Thwaites' equation divides by U⁶. From a stagnation point where `U = 0`, don't you hit divide-by-zero?"
 >
 > **🛡️ Defense:** Mathematically yes, there is a singularity at `x = 0`. To avoid crashing, the engine takes a well-posed analytical limit at the stagnation point to initialize θ², then runs `scipy.integrate.quad` from a micro-offset (`x = ε`) rather than absolute zero.
 
 ### 2. The "magic number" λ = −0.09
 
-> **⚠️ 🙋‍♂️:** "Why hard-flag separation at exactly `λ = −0.09`? Is it derived from first principles?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Why hard-flag separation at exactly `λ = −0.09`? Is it derived from first principles?"
 >
 > **🛡️ Defense:** It is a phenomenological correlation derived from exact solutions (like Falkner-Skan). Across many pressure distributions, the dimensionless shear parameter crosses zero at `λ ≈ −0.09`. It offers an instant alternative to a grid-based Navier-Stokes solve for locating the `τ_w = 0` point.
 
 ### 3. Accuracy vs. arbitrary shapes
 
-> **⚠️ 🙋‍♂️:** "Can Thwaites handle any arbitrary pressure distribution, or only simple shapes?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Can Thwaites handle any arbitrary pressure distribution, or only simple shapes?"
 >
 > **🛡️ Defense:** As an integral method based on the von Kármán momentum equation, it enforces momentum conservation across the bulk fluid regardless of the `U(x)` shape. Extreme inflection points may introduce minor errors in θ, but the predicted separation location remains robust for engineering design.
 
 ### 4. Transition vs. separation
 
-> **⚠️ 🙋‍♂️:** "What if the boundary layer transitions to turbulence before reaching `λ = −0.09`?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "What if the boundary layer transitions to turbulence before reaching `λ = −0.09`?"
 >
 > **🛡️ Defense:** That is the limit of this module. It assumes the flow stays laminar. If the critical Reynolds number is exceeded before `λ = −0.09`, turbulent mixing will delay separation significantly. The engine is modular, so the user must cross-verify transition criteria manually (Michel's criterion is on the roadmap).
 
@@ -394,25 +494,25 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 ### 1. The definition of "entrainment"
 
-> **⚠️ 🙋‍♂️:** "What is 'entrainment', and why is it a function only of the shape factor H?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "What is 'entrainment', and why is it a function only of the shape factor H?"
 >
 > **🛡️ Defense:** Entrainment is the macroscopic rate at which irrotational free-stream fluid is ingested into the turbulent boundary layer. Head postulated that this rate correlates with the velocity defect profile, parameterized by the kinematic shape factor `H = δ*/θ`. This closure reduces the complex turbulent mixing problem to a solvable 1D ODE system.
 
 ### 2. Solving coupled stiff ODEs
 
-> **⚠️ 🙋‍♂️:** "Head's method has two coupled ODEs. How do you keep the solver from diverging under extreme pressure gradients?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Head's method has two coupled ODEs. How do you keep the solver from diverging under extreme pressure gradients?"
 >
 > **🛡️ Defense:** The equations run through `scipy.integrate.solve_ivp`. For extreme adverse gradients where the system becomes stiff near separation, the engine can pivot from explicit Runge-Kutta (RK45) to implicit solvers like Radau or BDF, preventing numerical blow-off so the march reaches the separation threshold.
 
 ### 3. The Ludwieg-Tillmann dependency
 
-> **⚠️ 🙋‍♂️:** "Head's method needs skin friction `C_f`. Where does it come from if the flow is constantly changing?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Head's method needs skin friction `C_f`. Where does it come from if the flow is constantly changing?"
 >
 > **🛡️ Defense:** The solver couples the Ludwieg-Tillmann empirical correlation, `C_f = 0.246 · 10^(−0.678H) · Re_θ^(−0.268)`, into the ODE system. `C_f` is re-evaluated at every spatial step from the local momentum thickness and shape factor.
 
 ### 4. The H = 2.4 separation threshold
 
-> **⚠️ 🙋‍♂️: ** "Why warn at `H = 2.4`? Some texts say 2.6 or 3.0."
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Why warn at `H = 2.4`? Some texts say 2.6 or 3.0."
 >
 > **🛡️ Defense:** `H = 2.4` marks the onset of intermittent detachment (incipient separation). By `H = 3.0` there is massive reverse flow. The UI conservatively flags 2.4 as the critical design limit, preserving safety margin for diffusers and aerofoils.
 
@@ -422,25 +522,25 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 ### 1. The "zero skin friction" assumption
 
->   **⚠️ 🙋‍♂️: ** "Stratford assumes wall shear is exactly zero everywhere. Fluid can't flow with zero shear. Is this physically impossible?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Stratford assumes wall shear is exactly zero everywhere. Fluid can't flow with zero shear. Is this physically impossible?"
 >
 > **🛡️ Defense:** It can't be sustained indefinitely, which is why it is an inverse design limit, not a forward simulation. It defines the steepest pressure recovery theoretically possible. A diffuser following Stratford's `C_p` curve keeps the boundary layer on the brink of separation without failing. It is the mathematical ceiling of aerodynamic efficiency.
 
 ### 2. Sensitivity to initial conditions
 
->  **⚠️ 🙋‍♂️: ** "Stratford's equation needs a starting condition. Where does the adverse gradient begin?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Stratford's equation needs a starting condition. Where does the adverse gradient begin?"
 >
 > **🛡️ Defense:** The model needs an initial length of equivalent flat-plate flow (`x₀`) to establish baseline momentum thickness before aggressive pressure recovery begins. The solver uses `x₀` to scale the initial Reynolds number, so the boundary layer has enough momentum before facing the Stratford limit.
 
 ### 3. Transverse vs. streamwise gradients
 
-> **⚠️ 🙋‍♂️:** "Does it account for 3D cross-flow or transverse pressure gradients?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "Does it account for 3D cross-flow or transverse pressure gradients?"
 >
 > **🛡️ Defense:** No. It is rigorously a 2D approximation. Cross-flow or transverse boundary-layer bleeding violates the momentum balances used to derive the equation, so the engine enforces a strict 2D domain.
 
 ### 4. Root-finding for non-linear pressure recovery
 
->  **⚠️ 🙋‍♂️:** "The `C_p` equation is highly non-linear and implicit. How does the backend solve it without destabilizing?"
+> **⚠️ 🙋‍♂️🙋‍♂️🙋‍♂️:** "The `C_p` equation is highly non-linear and implicit. How does the backend solve it without destabilizing?"
 >
 > **🛡️ Defense:** Instead of isolating `C_p` algebraically, the backend casts the equation as a root-finding problem, using `scipy.optimize.root_scalar` (Brent's method) at discrete spatial nodes to compute the exact `C_p` satisfying the zero-shear balance.
 
@@ -450,7 +550,7 @@ A deterministic, CPU-bound, fully vectorized boundary-layer physics engine. Seve
 
 **👶 ELI5:** If you try to count a million drops of water one by one, it takes forever. That's how basic programming loops work. Our engine uses a "smart spreadsheet" (NumPy) that calculates all million drops at once using the computer's deepest hardware. We also keep the math brain (the physics engine) completely separate from the TV screen (the UI). To upgrade the math brain, we plug in a new chip without rebuilding the TV. No artificial intelligence guessing, no slow loading, just pure, instant math.
 
-> **🔬Technical Rigor**
+> **🔬 Academic Rigor**
 > The architecture follows a Model-View-Controller (MVC) paradigm, decoupling the deterministic physical solvers from the reactive Streamlit frontend. For zero-latency execution without GPU acceleration or neural-network approximations, the engine uses CPU-bound spatial vectorization. Computational grids are pre-allocated as dense arrays so differential and integral operations run as SIMD C-level blocks, bypassing Python interpreter overhead during spatial marching.
 >
 > Nonlinear formulations are routed to optimized Fortran-backed SciPy wrappers: collocation (`scipy.integrate.solve_bvp`) for boundary-value reductions, adaptive quadrature for singular integrals, and Newton-Raphson solvers for implicit continuities.
